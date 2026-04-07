@@ -1,0 +1,327 @@
+#+TITLE: skk-smart.el — 技術リファレンス
+#+AUTHOR: SKK Development Team
+#+LANGUAGE: ja
+
+インストールと基本的な使い方は [[file:../README.org][README.org]] を参照してください。
+このドキュメントはスコアリング仕様・カスタマイズ・内部アーキテクチャを扱います。
+
+* スコアリングのしくみ
+
+#+begin_example
+最終スコア = learned_weight  × (cur_learned + prev_w × prv_learned)
+           + corpus_weight   × (cur_corpus  + prev_w × prv_corpus)
+           + jisyo_weight    × 1/(辞書内位置 + 1)
+#+end_example
+
+- *学習スコア*: 過去に同じ読みを同様のコンテキストで確定した回数の累積値。
+  使い込むほど個人の文体に最適化される。
+- *共起統計スコア*: 外部コーパスから計算した PPMI（正の点相互情報量）。
+  初回起動から機能するコールドスタート対策。
+- *辞書位置スコア*: SKK 個人辞書内での候補の位置に基づく prior。
+  先頭（SKK 学習で最後に確定した語）ほど高く、1/(index+1) で減衰する。
+  コンテキスト信号がない場面での fallback として機能し、SKK 本来の学習と整合する。
+
+** コンテキストの文境界処理
+
+コンテキスト語は変換位置より前 =skk-smart-context-chars= 文字の範囲からスキャンされるが、
+直近の文末記号（=。！？= および改行）より前は =skk-smart-prev-sentence-weight= で減衰する。
+
+#+begin_example
+[← skk-smart-context-chars (300文字) →]
+前の文の漢字語            。  現在の文の漢字語   ▽きせい
+     ↑ prev_sentence_weight=0.3          ↑ weight=1.0
+#+end_example
+
+** SKK 学習との整合
+
+SKK は確定のたびに確定語を個人辞書の先頭に移動させる（=skk-jisyo-fix-order=nil= のとき）。
+skk-smart が受け取る候補リストはこの SKK 学習を反映した順序になっている。
+
+=skk-smart-jisyo-weight= により、この辞書順を prior として活用する：
+
+| コンテキスト信号の強さ | 動作 |
+|---|---|
+| 強い（学習データ・コーパスが一致） | 文脈スコアが支配し、辞書順を上書き |
+| 弱い（コンテキスト漢字語なし） | 辞書位置 prior のみが効き、SKK 学習の順序を維持 |
+| なし（全スコアがゼロ） | リランクせずそのまま返す |
+
+デフォルト =jisyo-weight=0.5= では、学習スコア 1 点（コンテキスト語 1 語の一致）で
+辞書先頭の prior（0.5）を上回るため、コンテキスト信号が 1 語でもあれば上書きできる。
+
+** 各スコアの値域の目安
+
+| スコア種別 | 値域の目安 | 備考 |
+|---|---|---|
+| 学習スコア（cur/prv） | 0〜10 程度（整数） | コンテキスト語の重複回数の累積 |
+| 共起スコア（cur/prv） | 0〜999 × 語数 | PPMI × 100 を整数化 |
+| corpus_weight 適用後 | 0〜1 程度 | 0.001 × 999 ≒ 1.0 |
+| jisyo_weight 適用後 | 0.5〜0.17 程度 | 0.5 × 1/(1〜3) |
+
+* カスタマイズ変数
+
+| 変数 | デフォルト | 説明 |
+|----+--------+-----|
+| =skk-smart-data-file= | =~/.skk-smart= | 学習データの保存先 |
+| =skk-smart-context-chars= | =300= | コンテキストとしてスキャンする文字数 |
+| =skk-smart-max-entries-per-midasi= | =200= | 見出し語ごとの最大学習エントリ数 |
+| =skk-smart-corpus-file= | =nil= | 共起統計 SQLite ファイルのパス（Emacs 29.1+ 必須） |
+| =skk-smart-learned-weight= | =1.0= | 学習スコアの重み |
+| =skk-smart-corpus-weight= | =0.001= | 共起統計スコアの重み |
+| =skk-smart-prev-sentence-weight= | =0.3= | 前の文のコンテキスト語に掛ける減衰率（0=無視、1=同等） |
+| =skk-smart-jisyo-weight= | =0.5= | 個人辞書の位置 prior の重み（0=無効） |
+| =skk-smart-max-score-entries= | =30= | スコアリング時に参照する学習エントリの最大数。新しい順に N 件のみ参照（0=制限なし） |
+| =skk-smart-max-context-words= | =10= | コンテキスト語として使用する漢字語の最大数。変換位置に近い語を優先（0=制限なし） |
+| =skk-smart-max-corpus-total-lookups= | =100= | 1 変換あたりのコーパス参照上限（候補数 × 語数）。超過時は候補数を縮小。0=無制限 |
+| =skk-smart-rerank-mode= | =simple= | リランク方式。=simple=: 最高スコア候補のみ先頭移動（他は元順序維持）。=full=: 全候補をスコアでソート（処理コスト高） |
+| =skk-smart-pending-wait= | =15= | 確定後、何回のコマンドを待ってから学習データに記録するか。この間に確定語が修正された場合は記録しない |
+| =skk-smart-debug= | =nil= | non-nil のとき変換・学習の詳細を =*Messages*= に出力 |
+| =skk-smart-llm-function= | =nil= | LLM リランキング関数（将来拡張用） |
+
+* 共起統計データの構築（手動手順）
+
+=tools/build_corpus.sh= による一括構築を推奨します（README.org 参照）。
+以下は個別ステップを直接実行する場合の手順です。
+
+** 動作要件
+
+共起統計バックエンドは SQLite を使用します。Emacs 29.1 以降のビルトイン sqlite3
+サポートが必要です。
+
+Wikipedia corpus（最適化後）の実測値（2026-04-06）:
+
+| 指標 | 値 |
+|------+-----|
+| ファイルサイズ | 262 MB |
+| cold ルックアップ（medium シナリオ、30候補×5語） | 2.0 ms |
+| warm ルックアップ（medium シナリオ） | 0.3 ms |
+| simple モード cold（集約 SQL） | 0.5 ms 以下 |
+
+** Wikipedia Japanese
+
+#+begin_src shell
+# 1. ダンプをダウンロード（数 GB）
+wget https://dumps.wikimedia.org/jawiki/latest/jawiki-latest-pages-articles.xml.bz2
+
+# 2. wikiextractor でプレーンテキストに変換
+pip install wikiextractor
+python -m wikiextractor --json -o wiki_out jawiki-latest-pages-articles.xml.bz2
+
+# 3. 共起カウントを計算
+python tools/build_cooccurrence.py \
+    --format wikipedia \
+    wiki_out/*/wiki_* \
+    > counts.tsv
+
+# 4. SQLite を生成
+python tools/make_sqlite.py \
+    --input counts.tsv \
+    --output ~/.skk-cooccurrence.sqlite \
+    --min-count 10 \
+    --streaming
+#+end_src
+
+** JParaCrawl
+
+[[https://www.kecl.ntt.co.jp/icl/lirg/jparacrawl/][JParaCrawl]] は NTT が公開している日英並列コーパスです（CC BY 4.0）。
+
+#+begin_src shell
+# 1. ダウンロード（JParaCrawl v3.0 の例）
+wget https://www.kecl.ntt.co.jp/icl/lirg/jparacrawl/release/3.0/bitext/en-ja.tar.gz
+tar xzf en-ja.tar.gz
+
+# 2. 共起カウントを計算
+python tools/build_cooccurrence.py \
+    --format jparacrawl \
+    en-ja/*.gz \
+    > counts_jpc.tsv
+
+# 3. Wikipedia のカウントとマージして SQLite を生成
+cat counts.tsv counts_jpc.tsv | \
+python tools/make_sqlite.py \
+    --output ~/.skk-cooccurrence.sqlite \
+    --min-count 10
+#+end_src
+
+JParaCrawl は翻訳文を含むため専門用語の共起が Wikipedia より強く出ます。
+両方をマージすると網羅性が上がります。=make_sqlite.py= は重複カウントを合算します。
+
+** 処理時間とファイルサイズの目安
+
+| データソース | 入力サイズ | SQLite サイズ |
+|----------+--------+-----------|
+| Wikipedia | 〜3GB | 〜262MB |
+| JParaCrawl v3 | 〜10GB | 〜180MB（推定）|
+| 両方マージ | — | 〜400MB（推定）|
+
+WITHOUT ROWID + score>=300 フィルタ + page_size=16384 により小さくなります。
+環境によって大幅に変わります。メモリは 4GB 以上推奨。
+
+** スコアの仕様
+
+SQLite に格納されるスコアは PPMI（正の点相互情報量）を整数化したものです：
+
+#+begin_example
+PMI(w₁, w₂) = log₂(P(w₁,w₂) × N / (P(w₁) × P(w₂)))
+PPMI = max(0, PMI)
+score = min(999, floor(PPMI × 100))    ∈ [0, 999]
+#+end_example
+
+テーブル定義:
+#+begin_src sql
+CREATE TABLE cooccurrence (
+    candidate    TEXT NOT NULL,
+    context_word TEXT NOT NULL,
+    score        INTEGER NOT NULL,
+    PRIMARY KEY (candidate, context_word)
+) WITHOUT ROWID
+#+end_src
+
+* tools/ リファレンス
+
+** build_cooccurrence.py
+
+コーパステキストから共起カウント TSV を生成します。
+
+#+begin_src
+usage: build_cooccurrence.py [-h] [--format {plain,wikipedia,jparacrawl}]
+                              [--ja-col JA_COL] [--window WINDOW]
+                              [--min-count MIN_COUNT]
+                              [files ...]
+
+引数:
+  files          入力ファイル（省略時は stdin）。gzip 対応。
+  --format       入力フォーマット（デフォルト: plain）
+  --ja-col N     jparacrawl での日本語列インデックス（デフォルト: 3）
+  --window N     共起ウィンドウサイズ（デフォルト: 10）
+  --min-count N  この回数未満の共起を出力しない（デフォルト: 5）
+
+出力: word TAB context_word TAB count（stdout）
+#+end_src
+
+** make_sqlite.py
+
+共起カウント TSV から PPMI を計算して SQLite ファイルを生成します。
+WITHOUT ROWID + page_size=16384 で最適化されたスキーマを使用します。
+
+#+begin_src
+usage: make_sqlite.py [-h] [--output OUTPUT] [--input INPUT]
+                      [--min-count MIN_COUNT] [--score-threshold N]
+                      [--streaming] [--test-fixture]
+
+引数:
+  --output, -o PATH    出力 SQLite ファイル（デフォルト: cooccurrence.sqlite）
+  --input, -i PATH     入力 TSV ファイルパス（省略時は stdin）
+  --min-count N        この回数未満の共起を除外（デフォルト: 10）
+  --score-threshold N  この値以下のスコアを除外（デフォルト: 0）
+  --streaming          二段パス省メモリモード（大規模 TSV 向け、--input が必要）
+  --test-fixture       テスト用フィクスチャを
+                       test/fixtures/test-cooccurrence.sqlite に生成する
+#+end_src
+
+** optimize_sqlite.py
+
+既存の SQLite corpus を WITHOUT ROWID + スコアフィルタ + ページサイズで再構築します。
+
+#+begin_src
+usage: optimize_sqlite.py [-h] [--min-score N]
+                          [--page-size {512,1024,2048,4096,8192,16384,32768,65536}]
+                          [--batch-size N] [--inplace]
+                          src_path [dst_path]
+
+引数:
+  src_path       入力 SQLite ファイル
+  dst_path       出力ファイル（省略時: 同名 + .opt.sqlite）
+  --min-score N  この値未満のエントリを除外（デフォルト: 300）
+  --page-size N  SQLite ページサイズ（デフォルト: 16384）
+  --inplace      完了後に入力ファイルを出力で上書き
+#+end_src
+
+* 内部アーキテクチャ
+
+#+begin_example
+skk-search-end-function
+  └─ skk-smart-context-search(henkan-buffer, midasi, okurigana, entry)
+       │  ※ entry は SKK 個人辞書の学習順（最後に確定した語が先頭）
+       │
+       ├─ skk-smart--get-context-words()      現在の文の漢字語抽出
+       │    └─ skk-smart--context-since-last-sentence()   文末記号で切り捨て
+       │         └─ skk-smart--extract-kanji-words()   \cC+ で漢字連続にマッチ
+       ├─ skk-smart--get-prev-context-words() 前の文の漢字語抽出
+       │
+       ├─ skk-smart--compute-combined-scores()   コンテキストスコア計算
+       │    ├─ skk-smart--compute-scores()       学習スコア（現在の文）
+       │    ├─ skk-smart--compute-scores()       学習スコア（前の文 × prev_w）
+       │    ├─ skk-smart--compute-corpus-scores()   共起スコア（現在の文）
+       │    └─ skk-smart--compute-corpus-scores()   共起スコア（前の文 × prev_w）
+       │         ├─ [simple + SQLite（デフォルト）] skk-smart--sqlite-compute-corpus-scores-batch()
+       │         │    SELECT candidate, SUM(score) WHERE candidate IN (...) GROUP BY candidate
+       │         │    ※ 候補×語数 の個別クエリを集約 SQL 1 発に置き換え
+       │         └─ [full モード] 候補×語数 の個別ルックアップ
+       │              └─ skk-smart--sqlite-lookup()  sqlite-select で検索
+       │
+       ├─ skk-smart--compute-jisyo-scores()   辞書位置 prior（1/(index+1)）
+       │    ※ entry の順序 = SKK 学習の結果をそのまま利用
+       │
+       ├─ [simple モード（デフォルト）] skk-smart--rerank-simple()  最高スコア候補のみ先頭移動
+       └─ [full モード]                skk-smart--rerank()          合成スコア降順・安定ソート
+
+skk-update-end-function
+  └─ skk-smart-context-update(henkan-buffer, midasi, okurigana, word, purge)
+       ├─ skk-smart--flush-pending()   前回の保留データをコミットまたは破棄
+       └─ skk-smart--store-pending()   今回の確定データを保留（マーカー付き）
+            └─ [post-command-hook] skk-smart--tick-pending()   コマンド回数を計測
+                 └─ skk-smart--flush-pending()   待機後、語が変わっていなければ記録
+                      └─ skk-smart--add-entry()   skk-smart-alist を更新
+                         ※ 記録するコンテキストは現在の文のみ（前の文は含まない）
+
+skk-completion-prog-list（server completion）
+  └─ skk-smart-comp-by-server-completion()
+       │  skk-comp-first = t のとき初期化
+       ├─ skk-server-completion-search-midasi(key)   読み候補を取得
+       ├─ skk-smart--get-context-words()    現在の文の漢字語を抽出
+       ├─ skk-smart--get-prev-context-words() 前の文の漢字語を抽出
+       ├─ skk-smart--rerank-comp-candidates()   スコア順に並び替え
+       │    └─ skk-smart--score-comp-candidate()   skk-smart-alist を参照
+       └─ pop skk-smart--server-comp-stack   1 候補ずつ返す
+#+end_example
+
+** コーパスバックエンドの初期化
+
+#+begin_example
+skk-smart-setup / skk-smart--corpus-ensure-open
+  └─ corpus-file（.sqlite）→ sqlite-open → skk-smart--sqlite-db
+#+end_example
+
+* テスト
+
+#+begin_src shell
+# 全テストを実行（初回は ddskk を自動クローン）
+make test
+
+# SQLite テスト用フィクスチャを生成してからテスト
+make fixture test
+
+# ddskk を再クローンしたい場合
+make clean-ddskk && make test
+#+end_src
+
+テストは 105 件。内訳:
+
+| カテゴリ | 件数 |
+|----------+------|
+| コンテキスト抽出・スコアリング | 約 40 件 |
+| corpus ルックアップ（SQLite） | 約 20 件 |
+| rerank-full / rerank-simple | 約 15 件 |
+| SQLite バッチクエリ | 約 10 件 |
+| okurigana / annotation 処理 | 約 10 件 |
+| コンテキスト更新・その他 | 約 10 件 |
+
+=test/fixtures/test-cooccurrence.sqlite= は =make fixture= または
+=python3 tools/make_sqlite.py --test-fixture= で生成します。
+
+ddskk は =Makefile= の =DDSKK_URL= から shallow clone されます。
+
+* ライセンス
+
+GNU General Public License v3 以降。
+詳細は [[file:../LICENSE][LICENSE]] を参照してください。

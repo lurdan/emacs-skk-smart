@@ -1,0 +1,57 @@
+Loading /etc/emacs/site-start.d/00debian.el (source)...
+skk-smart benchmark: CDB vs SQLite
+Emacs version: 30.1
+Corpus rows: ~24.6M (Wikipedia)
+Scenarios: (small medium large xlarge)
+Candidates pool: 100 words, Context pool: 30 words
+
+
+========================================
+Backend: CDB  (/workspace/corpus/skk-cooccurrence-wikipedia.cdb)
+========================================
+
+--- rerank-mode: full ---
+[small / full / cold] cands=5 ctx=2  n=200  total=2524.6ms  mean=12.62ms  min=11.51ms  p50=11.87ms  p95=22.88ms  p99=24.46ms  max=26.39ms
+[small / full / warm] cands=5 ctx=2  n=200  total=2463.1ms  mean=12.32ms  min=11.51ms  p50=11.60ms  p95=22.91ms  p99=23.17ms  max=23.93ms
+[medium / full / cold] cands=30 ctx=5  n=100  total=18466.6ms  mean=184.67ms  min=173.53ms  p50=186.35ms  p95=189.99ms  p99=193.11ms  max=196.41ms
+[medium / full / warm] cands=30 ctx=5  n=100  total=18420.0ms  mean=184.20ms  min=172.43ms  p50=185.71ms  p95=189.76ms  p99=192.72ms  max=194.08ms
+[large / full / cold] cands=30 ctx=10  n=50  total=18387.2ms  mean=367.74ms  min=356.99ms  p50=369.49ms  p95=381.93ms  p99=383.36ms  max=383.36ms
+[large / full / warm] cands=30 ctx=10  n=50  total=18599.9ms  mean=372.00ms  min=357.88ms  p50=370.88ms  p95=388.77ms  p99=388.93ms  max=388.93ms
+[xlarge / full / cold] cands=100 ctx=10  n=20  total=24637.8ms  mean=1231.89ms  min=1215.18ms  p50=1231.65ms  p95=1238.29ms  p99=1290.27ms  max=1290.27ms
+[xlarge / full / warm] cands=100 ctx=10  n=20  total=24526.4ms  mean=1226.32ms  min=1212.66ms  p50=1227.98ms  p95=1241.07ms  p99=1242.77ms  max=1242.77ms
+
+--- rerank-mode: simple ---
+[small / simple / cold] cands=5 ctx=2  n=200  total=2464.4ms  mean=12.32ms  min=11.47ms  p50=11.55ms  p95=22.59ms  p99=23.60ms  max=25.23ms
+[small / simple / warm] cands=5 ctx=2  n=200  total=2563.3ms  mean=12.82ms  min=11.54ms  p50=12.12ms  p95=22.78ms  p99=24.44ms  max=26.26ms
+[medium / simple / cold] cands=30 ctx=5  n=100  total=18515.1ms  mean=185.15ms  min=172.27ms  p50=185.21ms  p95=195.26ms  p99=200.94ms  max=207.72ms
+[medium / simple / warm] cands=30 ctx=5  n=100  total=18468.8ms  mean=184.69ms  min=173.45ms  p50=185.52ms  p95=191.00ms  p99=194.87ms  max=195.70ms
+[large / simple / cold] cands=30 ctx=10  n=50  total=18379.5ms  mean=367.59ms  min=357.43ms  p50=370.18ms  p95=375.14ms  p99=388.42ms  max=388.42ms
+[large / simple / warm] cands=30 ctx=10  n=50  total=18562.4ms  mean=371.25ms  min=358.66ms  p50=371.55ms  p95=387.54ms  p99=402.15ms  max=402.15ms
+[xlarge / simple / cold] cands=100 ctx=10  n=20  total=24521.3ms  mean=1226.07ms  min=1213.78ms  p50=1225.51ms  p95=1237.23ms  p99=1258.67ms  max=1258.67ms
+[xlarge / simple / warm] cands=100 ctx=10  n=20  total=24711.8ms  mean=1235.59ms  min=1219.58ms  p50=1233.61ms  p95=1257.32ms  p99=1278.40ms  max=1278.40ms
+
+========================================
+Backend: SQLite  (/workspace/corpus/skk-cooccurrence-wikipedia.sqlite)
+========================================
+
+--- rerank-mode: full ---
+[small / full / cold] cands=5 ctx=2  n=200  total=25.5ms  mean=0.13ms  min=0.12ms  p50=0.12ms  p95=0.14ms  p99=0.15ms  max=0.59ms
+[small / full / warm] cands=5 ctx=2  n=200  total=3.9ms  mean=0.02ms  min=0.02ms  p50=0.02ms  p95=0.02ms  p99=0.03ms  max=0.09ms
+[medium / full / cold] cands=30 ctx=5  n=100  total=203.2ms  mean=2.03ms  min=1.70ms  p50=1.77ms  p95=1.94ms  p99=12.84ms  max=12.88ms
+[medium / full / warm] cands=30 ctx=5  n=100  total=26.7ms  mean=0.27ms  min=0.15ms  p50=0.16ms  p95=0.17ms  p99=0.19ms  max=10.96ms
+[large / full / cold] cands=30 ctx=10  n=50  total=199.3ms  mean=3.99ms  min=3.41ms  p50=3.48ms  p95=4.20ms  p99=14.96ms  max=14.96ms
+[large / full / warm] cands=30 ctx=10  n=50  total=25.0ms  mean=0.50ms  min=0.26ms  p50=0.27ms  p95=0.29ms  p99=11.51ms  max=11.51ms
+[xlarge / full / cold] cands=100 ctx=10  n=20  total=299.2ms  mean=14.96ms  min=13.51ms  p50=13.83ms  p95=24.82ms  p99=25.28ms  max=25.28ms
+[xlarge / full / warm] cands=100 ctx=10  n=20  total=40.9ms  mean=2.05ms  min=0.89ms  p50=0.91ms  p95=12.16ms  p99=12.20ms  max=12.20ms
+
+--- rerank-mode: simple ---
+[small / simple / cold] cands=5 ctx=2  n=200  total=17.7ms  mean=0.09ms  min=0.06ms  p50=0.06ms  p95=0.08ms  p99=0.09ms  max=4.77ms
+[small / simple / warm] cands=5 ctx=2  n=200  total=24.8ms  mean=0.12ms  min=0.06ms  p50=0.06ms  p95=0.09ms  p99=0.11ms  max=11.49ms
+[medium / simple / cold] cands=30 ctx=5  n=100  total=28.0ms  mean=0.28ms  min=0.26ms  p50=0.27ms  p95=0.33ms  p99=0.40ms  max=0.69ms
+[medium / simple / warm] cands=30 ctx=5  n=100  total=38.7ms  mean=0.39ms  min=0.26ms  p50=0.27ms  p95=0.33ms  p99=0.38ms  max=11.45ms
+[large / simple / cold] cands=30 ctx=10  n=50  total=24.7ms  mean=0.49ms  min=0.45ms  p50=0.47ms  p95=0.55ms  p99=1.14ms  max=1.14ms
+[large / simple / warm] cands=30 ctx=10  n=50  total=37.7ms  mean=0.75ms  min=0.45ms  p50=0.53ms  p95=0.66ms  p99=11.72ms  max=11.72ms
+[xlarge / simple / cold] cands=100 ctx=10  n=20  total=80.3ms  mean=4.01ms  min=3.59ms  p50=3.81ms  p95=4.88ms  p99=4.95ms  max=4.95ms
+[xlarge / simple / warm] cands=100 ctx=10  n=20  total=80.0ms  mean=4.00ms  min=3.27ms  p50=3.38ms  p95=4.23ms  p99=14.65ms  max=14.65ms
+
+Done.

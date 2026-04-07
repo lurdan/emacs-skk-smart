@@ -1,0 +1,147 @@
+#+TITLE: skk-smart.el — SKK 文脈対応候補リランキング
+#+LANGUAGE: ja
+
+[[https://www.gnu.org/licenses/gpl-3.0][https://img.shields.io/badge/License-GPLv3-blue.svg]]
+
+* 概要
+
+skk-smart は [[https://github.com/skk-dev/ddskk][Daredevil SKK]] の拡張パッケージです。
+変換位置の前後にある漢字語をコンテキストとして使い、同音異義語の変換候補を
+文脈に合った順序に並び替えます。
+
+ddskk 本体は変更せず、SKK の標準フック／アドバイスに登録するだけで動作します。
+
+「こうか」を変換するとき：
+
+| バッファの前文 | 上位に来る候補 |
+|-------------+-------------|
+| 薬の治療を受けた後… | 効果 |
+| 特許の審査を経て… | 高価（法律文脈）|
+| 山を登って下りた… | 降下 |
+
+使うほど精度が上がる個人学習と、Wikipedia・JParaCrawl から構築する
+共起統計データベースを組み合わせて使えます。
+スコアリングの詳細は [[file:docs/skk-smart.org][docs/skk-smart.org]] を参照してください。
+
+* 動作要件
+
+- [[https://github.com/skk-dev/ddskk][Daredevil SKK]]
+- Emacs 29.1 以降（ビルトイン sqlite3 サポートが必要）
+
+* インストール
+
+** 基本設定
+
+=~/.skk= に追加してください：
+
+#+begin_src emacs-lisp
+(require 'skk-smart)
+(skk-smart-setup)
+#+end_src
+
+これだけで個人学習が有効になります。Emacs 終了時に =~/.skk-smart= へ
+自動保存され、次回起動時に読み込まれます。
+
+** 共起統計データを使う場合
+
+共起統計データを用意した後（[[*共起統計データの構築]]を参照）、パスを設定してください：
+
+#+begin_src emacs-lisp
+(require 'skk-smart)
+(setq skk-smart-corpus-file "~/.skk-cooccurrence.sqlite")
+(skk-smart-setup)
+#+end_src
+
+デフォルトの =skk-smart-rerank-mode= は =simple= で、スコア最大の候補のみ先頭に移動し
+他の順序は SKK の学習順を維持します。SQLite バックエンドでは集約 SQL 1 クエリで動作し
+cold 状態でも 0.5 ms 以下です。全候補をスコア順に並べたい場合は =full= に変更できます：
+
+#+begin_src emacs-lisp
+(setq skk-smart-rerank-mode 'full)  ; 全候補をスコア降順にソート
+#+end_src
+
+** 読み補完（server completion）のリランキング
+
+Tab キーによる読み補完にもコンテキストリランキングを適用できます：
+
+#+begin_src emacs-lisp
+(require 'skk-smart)
+(skk-smart-setup)
+
+(setq skk-completion-prog-list
+      (cons #'skk-smart-comp-by-server-completion
+            (delq #'skk-comp-by-server-completion skk-completion-prog-list)))
+#+end_src
+
+* 共起統計データの構築
+
+=tools/build_corpus.sh= を使うとダウンロードから SQLite 生成まで一括で行えます：
+
+#+begin_src shell
+# Wikipedia のみ
+tools/build_corpus.sh --wikipedia --output ~/.skk-cooccurrence.sqlite
+
+# JParaCrawl のみ（展開済みディレクトリを指定）
+tools/build_corpus.sh --jparacrawl /data/en-ja --output ~/.skk-cooccurrence.sqlite
+
+# 両方マージ（推奨: --min-count-pre 1 で合算の精度を上げる）
+tools/build_corpus.sh --wikipedia --jparacrawl /data/en-ja \
+  --min-count-pre 1 --output ~/.skk-cooccurrence.sqlite
+#+end_src
+
+| オプション | デフォルト | 説明 |
+|-----------+----------+-----|
+| =--wikipedia= | — | Wikipedia ダンプをダウンロードして処理する |
+| =--jparacrawl DIR= | — | JParaCrawl の展開済みディレクトリを指定する |
+| =--output PATH= | =~/.skk-cooccurrence.sqlite= | 出力 SQLite ファイルパス |
+| =--min-count N= | =10= | 最終フィルタ: SQLite に格納する最低共起回数（全コーパス合算後） |
+| =--min-count-pre N= | =3= | 中間フィルタ: 各コーパスの TSV 生成時の最低共起回数 |
+| =--window N= | =10= | 共起ウィンドウサイズ（前後 N 語以内） |
+| =--keep-intermediate= | — | 中間ファイルを削除しない |
+
+中間ファイルが既に存在する場合は再利用されます（再実行が安全）。
+
+** フィルタリングの仕組み
+
+共起カウントは二段階でフィルタリングされます：
+
+#+begin_example
+[コーパス A]──build_cooccurrence.py──[中間 TSV A]─┐
+                  ↑ --min-count-pre (デフォルト 3)  │
+[コーパス B]──build_cooccurrence.py──[中間 TSV B]─┤
+                                                    │ cat でマージ
+                                           make_sqlite.py（合算）
+                                              ↑ --min-count (デフォルト 10)
+                                           cooccurrence.sqlite
+#+end_example
+
+- =--min-count-pre= は中間 TSV のサイズを抑えるパフォーマンス最適化です。
+  =--min-count= より大きい値を設定すると最終フィルタを通過すべきペアが失われるため、
+  スクリプトが自動的に =--min-count= の値に揃えます。
+
+- コーパスが 1 つの場合（Wikipedia のみなど）、=--min-count-pre= の値は精度に影響しません。
+  =--min-count= 以下であれば、SQLite の内容は同じになります。
+
+- コーパスを複数マージする場合、=--min-count-pre= を低くするほど各コーパスの低頻度ペアが
+  合算に参加できます。完全な合算精度が必要なら =--min-count-pre 1= を指定してください
+  （中間ファイルが数倍に増大します）。
+
+手動での構築手順や処理時間の目安は [[file:docs/skk-smart.org][docs/skk-smart.org]] を参照してください。
+
+* skk-study との違い
+
+skk-study（ddskk 付属）と skk-smart は競合しません。
+
+| | skk-study | skk-smart |
+|-+----------+----------|
+| コンテキストの種類 | 直前 1 変換（バイグラム） | 前 N 文字の漢字語群 |
+| マッチング | 完全一致 | 集合のオーバーラップ |
+| コールドスタート | 2 変換後から機能 | コーパスがあれば初回から機能 |
+| 文書トピックの把握 | 難しい | 得意 |
+
+両方を有効にすると、skk-study が連鎖性を、skk-smart がトピック性を担います。
+
+* ライセンス
+
+GNU General Public License v3 以降。
+詳細は [[file:LICENSE][LICENSE]] を参照してください。
