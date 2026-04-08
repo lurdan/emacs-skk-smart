@@ -104,7 +104,7 @@ wget https://dumps.wikimedia.org/jawiki/latest/jawiki-latest-pages-articles.xml.
 
 # 2. wikiextractor でプレーンテキストに変換
 pip install wikiextractor
-python -m wikiextractor --json -o wiki_out jawiki-latest-pages-articles.xml.bz2
+wikiextractor --json -o wiki_out jawiki-latest-pages-articles.xml.bz2
 
 # 3. 共起カウントを計算
 python tools/build_cooccurrence.py \

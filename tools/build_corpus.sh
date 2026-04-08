@@ -166,11 +166,36 @@ if $USE_WIKIPEDIA; then
     # 2. wikiextractor
     if [[ ! -d "$WIKI_OUT" ]]; then
         log "wikiextractor でテキスト抽出中..."
-        if ! python3 -c "import wikiextractor" &>/dev/null; then
+        if ! command -v wikiextractor &>/dev/null && ! python3 -c "import wikiextractor" &>/dev/null; then
             echo "エラー: wikiextractor が見つかりません。pip install wikiextractor を実行してください。" >&2
             exit 1
         fi
-        python3 -m wikiextractor --json -o "$WIKI_OUT" "$WIKI_DUMP"
+        # Python 3.13+ では re パターン途中の (?i) フラグが禁止された。
+        # wikiextractor の extract.py にその問題があれば自動パッチする。
+        python3 - <<'PYEOF'
+import re, sys
+try:
+    import wikiextractor, os
+    path = os.path.join(os.path.dirname(wikiextractor.__file__), 'extract.py')
+    src = open(path, encoding='utf-8').read()
+    # Python 3.13: re パターン途中の (?i) フラグが禁止された。
+    #   \[(((?i)protocols...) → (?i)\[((protocols...)  先頭移動
+    #   ((?i)gif|png|...)     → (?i:gif|png|...)       非キャプチャ形式
+    patched = src
+    patched = patched.replace(r"'\[(((?i)'", r"'(?i)\[(('" )
+    patched = re.sub(r'\(\(\?i\)([^)]+)\)', r'(?i:\1)', patched)
+    if patched != src:
+        open(path, 'w', encoding='utf-8').write(patched)
+        print("wikiextractor/extract.py: Python 3.13 互換パッチを適用しました", file=sys.stderr)
+except Exception:
+    pass  # パッチ失敗は無視（実行時にエラーが出れば検知できる）
+PYEOF
+        if command -v wikiextractor &>/dev/null; then
+            wikiextractor --json -o "$WIKI_OUT" "$WIKI_DUMP"
+        else
+            # 古いバージョン（__main__.py あり）向けのフォールバック
+            python3 -m wikiextractor --json -o "$WIKI_OUT" "$WIKI_DUMP"
+        fi
         log "抽出完了: $(find "$WIKI_OUT" -type f | wc -l) ファイル"
     else
         log "既存の抽出済みデータを使用: $WIKI_OUT"
@@ -233,6 +258,7 @@ if [[ ${#COUNTS_FILES[@]} -eq 1 ]]; then
         --input "${COUNTS_FILES[0]}" \
         --output "$OUTPUT" \
         --min-count "$MIN_COUNT" \
+        --score-threshold 300 \
         --streaming
 else
     # 複数コーパスのカウントを合算して一時ファイルに書き出す
@@ -243,6 +269,7 @@ else
         --input "$MERGED_COUNTS" \
         --output "$OUTPUT" \
         --min-count "$MIN_COUNT" \
+        --score-threshold 300 \
         --streaming
     rm -f "$MERGED_COUNTS"
 fi

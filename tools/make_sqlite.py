@@ -24,8 +24,9 @@ from collections import defaultdict
 def create_sqlite(path: str) -> sqlite3.Connection:
     """最適化済み SQLite データベースを作成する。"""
     conn = sqlite3.connect(path)
+    # page_size は最初の書き込み前（journal_mode 設定より前）に指定する必要がある
+    conn.execute("PRAGMA page_size=16384;")
     conn.execute("PRAGMA journal_mode=WAL;")
-    conn.execute(f"PRAGMA page_size=16384;")
     conn.execute("""
         CREATE TABLE IF NOT EXISTS cooccurrence (
             candidate   TEXT NOT NULL,
@@ -242,8 +243,8 @@ def main() -> None:
     parser.add_argument(
         "--score-threshold",
         type=int,
-        default=0,
-        help="この値以下の PPMI スコアのエントリを除外する（デフォルト: 0）",
+        default=300,
+        help="この値以下の PPMI スコアのエントリを除外する（デフォルト: 300）",
     )
     parser.add_argument(
         "--input", "-i",
